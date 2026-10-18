@@ -1,0 +1,29 @@
+{
+  "name": "zorr-assembler",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.11.0 <25"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/serve.mjs",
+    "preview": "node scripts/serve.mjs",
+    "tunnel": "node scripts/tunnel.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@babel/generator": "8.0.0",
+    "@babel/parser": "8.0.4",
+    "@babel/traverse": "8.0.4",
+    "@babel/types": "8.0.4",
+    "@napi-rs/canvas": "1.0.11",
+    "webcrack": "2.16.0",
+    "zorr-deobfuscator": "https://codeload.github.com/suicanifuramu/zorr-deobfuscator/tar.gz/fdf8e0882ea9831ec58b695398069fa101df52be"
+  },
+  "devDependencies": {
+    "prettier": "3.9.10",
+    "wrangler": "4.151.1"
+  }
+}
