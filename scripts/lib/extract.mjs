@@ -77,9 +77,22 @@ export function extract(source, { Path2D }) {
   const rawRecipes = [];
   const rarityArrays = [];
   const iconBodies = [];
+  const iconLabels = [];
+  const listRenderers = [];
+  const defaultFonts = [];
   traverse(ast, {
     VariableDeclarator(p) {
       const n = p.node;
+      if (
+        t.isConditionalExpression(n.init) &&
+        t.isMemberExpression(n.init.test?.left) &&
+        key(n.init.test.left) === "font" &&
+        t.isConditionalExpression(n.init.alternate) &&
+        t.isStringLiteral(n.init.alternate.consequent) &&
+        t.isNullLiteral(n.init.alternate.alternate)
+      ) {
+        defaultFonts.push(n.init.alternate.consequent.value);
+      }
       if (
         t.isStringLiteral(n.init) &&
         /^\s*(?:[a-z0-9_]+ [1-9]\d*\n)+-\n/.test(n.init.value)
@@ -110,11 +123,175 @@ export function extract(source, { Path2D }) {
         ["iconScale", "iconX", "iconY"].every((k) => seen.has(k))
       )
         iconBodies.push(p);
+      if (
+        ["iconNameLines", "iconNameScale", "measureText", "strokeText"].every(
+          (k) => seen.has(k),
+        )
+      )
+        iconLabels.push(p);
+      if (
+        p.node.params.length === 3 &&
+        ["Hh", "offsetTop", "scrollTop", "showIcons", "strokeText"].every((k) =>
+          seen.has(k),
+        )
+      )
+        listRenderers.push(p);
     },
   });
   const raw = unique(rawRecipes, "recipe text");
   const rarity = unique(rarityArrays, "rarity table");
   const iconBody = unique(iconBodies, "icon body renderer");
+  const iconLabel = unique(iconLabels, "icon name renderer");
+  const listRenderer = unique(listRenderers, "slot canvas renderer");
+  const font = unique([...new Set(defaultFonts)], "production default font");
+  const replacements = new Map();
+  const hostBindings = new Map();
+  const bindHost = (p, name, value) => {
+    const binding = p.scope.getBinding(name);
+    if (!binding) throw new Error(`Missing Canvas adapter binding: ${name}`);
+    hostBindings.set(
+      binding.path.node,
+      t.variableDeclarator(t.identifier(name), value),
+    );
+  };
+  const hostMember = (name) =>
+    t.memberExpression(t.identifier("host"), t.identifier(name));
+  const tileSizes = new Set();
+  listRenderer.traverse({
+    CallExpression(p) {
+      const n = p.node;
+      if (
+        t.isIdentifier(n.callee) &&
+        t.isStringLiteral(n.arguments[0]) &&
+        n.arguments[0].value.startsWith("<canvas")
+      )
+        bindHost(
+          p,
+          n.callee.name,
+          t.arrowFunctionExpression([], hostMember("canvas")),
+        );
+      if (!t.isMemberExpression(n.callee)) return;
+      if (
+        key(n.callee) === "on" &&
+        t.isStringLiteral(n.arguments[0], { value: "sprite_rendered" })
+      )
+        bindHost(
+          p,
+          n.callee.object.name,
+          t.objectExpression([
+            t.objectMethod(
+              "method",
+              t.identifier("on"),
+              [],
+              t.blockStatement([]),
+            ),
+          ]),
+        );
+      if (key(n.callee) === "drawImage")
+        bindHost(p, n.arguments[0].name, hostMember("atlas"));
+      const scale = n.arguments[0];
+      if (
+        key(n.callee) === "As" &&
+        t.isBinaryExpression(scale, { operator: "/" }) &&
+        t.isMemberExpression(scale.left) &&
+        key(scale.left) === "offsetWidth" &&
+        t.isNumericLiteral(scale.right)
+      )
+        tileSizes.add(scale.right.value);
+    },
+    MemberExpression(p) {
+      if (key(p.node) === "showIcons")
+        bindHost(
+          p,
+          p.node.object.name,
+          t.objectExpression([
+            t.objectProperty(t.identifier("showIcons"), t.booleanLiteral(true)),
+          ]),
+        );
+      if (
+        p.node.computed &&
+        t.isIdentifier(p.node.object) &&
+        generate(p.node.property).code.includes("petal-")
+      )
+        bindHost(p, p.node.object.name, hostMember("mapping"));
+    },
+    IfStatement(p) {
+      if (
+        t.isIdentifier(p.node.test) &&
+        generate(p.node.consequent).code.includes("rendering icons:")
+      )
+        bindHost(p, p.node.test.name, t.booleanLiteral(false));
+    },
+  });
+  iconLabel.traverse({
+    AssignmentExpression(p) {
+      const n = p.node;
+      if (
+        t.isMemberExpression(n.left) &&
+        key(n.left) === "font" &&
+        t.isBinaryExpression(n.right) &&
+        t.isIdentifier(n.right.right)
+      ) {
+        const b = p.scope.getBinding(n.right.right.name);
+        replacements.set(b.path.node, t.stringLiteral(JSON.stringify(font)));
+      }
+    },
+    CallExpression(p) {
+      const n = p.node;
+      if (
+        t.isIdentifier(n.callee) &&
+        t.isStringLiteral(n.arguments[0], { value: "petals" }) &&
+        t.isStringLiteral(n.arguments[2], { value: "name" })
+      ) {
+        const b = p.scope.getBinding(n.callee.name);
+        replacements.set(
+          b.path.node,
+          t.arrowFunctionExpression(
+            [
+              t.identifier("category"),
+              t.identifier("item"),
+              t.identifier("field"),
+            ],
+            t.memberExpression(
+              t.identifier("item"),
+              t.identifier("field"),
+              true,
+            ),
+          ),
+        );
+      }
+    },
+  });
+  const iconSizes = new Set();
+  for (const ref of iconBody.scope.getBinding(iconBody.node.id.name)
+    .referencePaths) {
+    if (!ref.parentPath.isCallExpression()) continue;
+    for (let p = ref.parentPath.parentPath; p; p = p.parentPath) {
+      if (!p.isBlockStatement()) continue;
+      const sizes = new Set();
+      p.traverse({
+        CallExpression(q) {
+          const n = q.node,
+            a = n.arguments[0];
+          if (
+            n.start < ref.node.start &&
+            t.isMemberExpression(n.callee) &&
+            key(n.callee) === "As" &&
+            t.isBinaryExpression(a, { operator: "/" }) &&
+            t.isNumericLiteral(a.left, { value: 1 }) &&
+            t.isNumericLiteral(a.right)
+          )
+            sizes.add(a.right.value);
+        },
+      });
+      if (sizes.size) {
+        if (sizes.size === 1) iconSizes.add([...sizes][0]);
+        break;
+      }
+    }
+  }
+  const iconSize = unique([...iconSizes], "icon design size");
+  const tileSize = unique([...tileSizes], "slot design size");
   const dataScope = raw.scope;
   const dataBlock = dataScope.path.node.body;
   if (!t.isBlockStatement(dataBlock))
@@ -262,13 +439,21 @@ export function extract(source, { Path2D }) {
         )
           return;
         if (extras.has(b.path.node)) return;
+        if (hostBindings.has(b.path.node)) return;
         let declaration;
-        if (b.path.isFunctionDeclaration()) declaration = b.path.node;
+        if (replacements.has(b.path.node)) {
+          declaration = t.variableDeclaration("const", [
+            t.variableDeclarator(
+              t.identifier(q.node.name),
+              replacements.get(b.path.node),
+            ),
+          ]);
+        } else if (b.path.isFunctionDeclaration()) declaration = b.path.node;
         else if (b.path.isVariableDeclarator())
           declaration = t.variableDeclaration("const", [b.path.node]);
         else throw new Error(`Unsupported renderer dependency: ${q.node.name}`);
         extras.set(b.path.node, declaration);
-        collect(b.path);
+        if (!replacements.has(b.path.node)) collect(b.path);
       },
       CallExpression(q) {
         if (
@@ -282,21 +467,40 @@ export function extract(source, { Path2D }) {
   }
   extras.set(iconBody.node, iconBody.node);
   collect(iconBody);
+  extras.set(iconLabel.node, iconLabel.node);
+  collect(iconLabel);
+  collect(listRenderer);
   for (const override of overrides) collect(override);
   if (!propertyName) throw new Error("Petal property evaluator was not found");
-  const exportCode = `globalThis.result={petals:${petalName},rarities:${rarity.node.id.name},recipes:${recipeName},property:${propertyName},draw:${iconBody.node.id.name}};`;
+  const factory = t.functionDeclaration(
+    t.identifier("paintSlot"),
+    [t.identifier("host")],
+    t.blockStatement([
+      t.variableDeclaration("const", [...hostBindings.values()]),
+      listRenderer.node,
+      ...parse(
+        `const list=new ${listRenderer.node.id.name}(host.grid,true);list.reset();list.draw();return list.canvas;`,
+        { allowReturnOutsideFunction: true },
+      ).program.body,
+    ]),
+  );
+  const exportCode = `globalThis.result={petals:${petalName},rarities:${rarity.node.id.name},recipes:${recipeName},property:${propertyName},draw:${iconBody.node.id.name},label:${iconLabel.node.id.name},paintSlot};`;
   const code = generate(
     t.program([
       ...prefix,
       ...extras.values(),
       ...overrides.map((p) => t.expressionStatement(p.node)),
+      factory,
     ]),
     { comments: false },
   ).code;
   const context = vm.createContext({
     Path2D,
     console: { log() {} },
-    window: { IS_PROD: true },
+    window: { IS_PROD: true, devicePixelRatio: 2 },
+    ResizeObserver: class {
+      observe() {}
+    },
   });
   vm.runInContext(code + "\n" + exportCode, context, {
     timeout: 30_000,
@@ -330,11 +534,14 @@ export function extract(source, { Path2D }) {
     ...data,
     superRarity,
     intervalMs: schedule.intervalMs,
+    rendering: { iconSize, tileSize, font },
     extraction: {
       apiAliases: aliases.size,
       recipeLine: raw.node.loc.start.line,
       rotationLine: schedule.line,
       rendererLine: iconBody.node.loc.start.line,
+      labelLine: iconLabel.node.loc.start.line,
+      slotRendererLine: listRenderer.node.loc.start.line,
     },
   };
 }

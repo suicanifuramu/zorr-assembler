@@ -12,6 +12,7 @@ const mime = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".webp": "image/webp",
+  ".png": "image/png",
 };
 try {
   await stat(path.join(root, "index.html"));

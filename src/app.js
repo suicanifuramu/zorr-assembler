@@ -42,8 +42,7 @@ let ticker;
 function petal(item, compact = false) {
   const p = data.petals[item.slug];
   return `<div class="petal ${compact ? "petal-compact" : ""}" title="${escape(p.name)} × ${item.count}">
-    <div class="petal-picture"><img src="${escape(new URL(p.image, dataURL).href)}" width="160" height="136" alt="" loading="${compact ? "lazy" : "eager"}" decoding="async"><span class="petal-quantity">×${quantity.format(item.count)}</span></div>
-    <span class="petal-name" lang="en">${escape(p.name)}</span><span class="sr-only"> ${item.count}個</span>
+    <div class="petal-picture"><img src="${escape(new URL(p.images[item.count], dataURL).href)}" width="${data.rendering.pixelSize}" height="${data.rendering.pixelSize}" alt="${escape(p.name)} ${item.count}個" loading="${compact ? "lazy" : "eager"}" decoding="async"></div>
   </div>`;
 }
 
@@ -144,7 +143,7 @@ async function init() {
   if (!response.ok) throw new Error(`Data HTTP ${response.status}`);
   data = await response.json();
   if (
-    data.schemaVersion !== 1 ||
+    data.schemaVersion !== 2 ||
     !data.recipes.length ||
     !data.intervalMs ||
     !data.petals

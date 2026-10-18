@@ -15,7 +15,7 @@ test("built site contains complete live recipes and a valid generated icon for e
   const data = JSON.parse(
     await readFile(path.join(dist, "assets", file), "utf8"),
   );
-  assert.equal(data.schemaVersion, 1);
+  assert.equal(data.schemaVersion, 2);
   assert.equal(data.rarity.slug, "super");
   assert.match(data.rarity.color, /^#[a-f\d]{6}$/i);
   assert.match(data.source.script, /^https:\/\/zorr\.pages\.dev\/[^/]+\.js/);
@@ -29,15 +29,18 @@ test("built site contains complete live recipes and a valid generated icon for e
     for (const item of [...recipe.inputs, ...recipe.outputs]) {
       assert.ok(Number.isSafeInteger(item.count) && item.count > 0);
       assert.ok(data.petals[item.slug]?.name);
+      assert.ok(data.petals[item.slug].images[item.count]);
     }
   }
   for (const petal of Object.values(data.petals)) {
     assert.ok(Number.isSafeInteger(petal.bodies) && petal.bodies >= 0);
-    const iconPath = path.join(dist, "assets", petal.image);
-    assert.ok((await stat(iconPath)).size > 0);
-    const image = await loadImage(iconPath);
-    assert.equal(image.width, 160);
-    assert.equal(image.height, 136);
+    for (const file of Object.values(petal.images)) {
+      const iconPath = path.join(dist, "assets", file);
+      assert.ok((await stat(iconPath)).size > 0);
+      const image = await loadImage(iconPath);
+      assert.equal(image.width, data.rendering.pixelSize);
+      assert.equal(image.height, data.rendering.pixelSize);
+    }
   }
   const s = scheduleAt(Date.now(), data.recipes, data.intervalMs);
   assert.equal(
@@ -61,6 +64,7 @@ test("published output has no game runtime, research artifacts, placeholders or 
     "utf8",
   );
   assert.doesNotMatch(app, /__[A-Z_]+__|research\/|deobfuscator|WebSocket/);
+  assert.doesNotMatch(app, /class="petal-(?:quantity|name)"/);
   assert.deepEqual((await readdir(dist)).sort(), [
     "404.html",
     "_headers",

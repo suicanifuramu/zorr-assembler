@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile, mkdir, rm, cp, rename } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { createCanvas, Path2D } from "@napi-rs/canvas";
+import { Path2D, GlobalFonts } from "@napi-rs/canvas";
 import { webcrack } from "webcrack";
 import deobfuscator from "zorr-deobfuscator";
 import { extract } from "./lib/extract.mjs";
+import { paintAtlasCell, paintTile } from "./lib/paint.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const cache = path.join(root, ".cache");
@@ -80,9 +81,12 @@ async function main() {
   }
   const game = extract(decoded, { Path2D });
   const petals = new Map();
+  const quantities = new Map();
   const items = (list) =>
     list.map(({ petal, count }) => {
       petals.set(petal.slug, petal);
+      if (!quantities.has(petal.slug)) quantities.set(petal.slug, new Set());
+      quantities.get(petal.slug).add(count);
       return { slug: petal.slug, count };
     });
   const recipes = game.recipes.map((r) => ({
@@ -91,13 +95,30 @@ async function main() {
     outputs: items(r.outputs),
   }));
   const images = {};
+  const fontStyleURL = new URL("https://fonts.googleapis.com/css2");
+  fontStyleURL.searchParams.set("family", game.rendering.font);
+  const characters = [
+    ...new Set(
+      [...petals.values()].map((p) => p.name).join("") + " 0123456789.xkmbt",
+    ),
+  ].join("");
+  fontStyleURL.searchParams.set("text", characters);
+  const fontStyle = await download(fontStyleURL.href);
+  const fontURL = fontStyle.body.match(/src:\s*url\(([^)]+)\)/)?.[1];
+  if (!fontURL) throw new Error("Upstream icon font URL was not found");
+  const fontResponse = await fetch(fontURL, {
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!fontResponse.ok) throw new Error(`Font HTTP ${fontResponse.status}`);
+  const fontBytes = Buffer.from(await fontResponse.arrayBuffer());
+  if (!GlobalFonts.register(fontBytes, game.rendering.font))
+    throw new Error("Upstream icon font could not be registered");
+  const fontHash = hash(fontBytes);
+  await writeFile(path.join(cache, `font.${fontHash}.ttf`), fontBytes);
+  log(`Loaded upstream icon font: ${game.rendering.font}`);
+  let tileRendering;
   // This is the original icon renderer. Supply the lowest body count while retaining
   // the original size/position/angle; Super is a presentation color, not a quantity.
-  const proto = Object.getPrototypeOf(createCanvas(1, 1).getContext("2d"));
-  if (!proto.As)
-    proto.As = function (s) {
-      this.scale(s, s);
-    };
   for (const [slug, petal] of petals) {
     if (!/^[a-z\d_]+$/.test(slug)) throw new Error(`Unsafe petal slug ${slug}`);
     const counts = game.rarities.map((r) =>
@@ -107,17 +128,20 @@ async function main() {
       throw new Error(`Invalid body count ${slug}`);
     const minimum = Math.min(...counts);
     const rarity = game.rarities[counts.indexOf(minimum)];
-    const canvas = createCanvas(160, 136);
-    const ctx = canvas.getContext("2d");
-    ctx.scale(2, 2);
-    game.draw(ctx, petal, rarity.id);
-    const bytes = await canvas.encode("webp", 95);
-    const file = assetName(`petal-${slug}`, "webp", bytes);
-    await writeFile(path.join(staging, "assets", file), bytes);
-    images[slug] = { name: petal.name, image: `./${file}`, bodies: minimum };
+    const atlas = paintAtlasCell(game, petal, rarity.id);
+    const variants = {};
+    for (const count of quantities.get(slug)) {
+      const { canvas, ...layout } = paintTile(game, atlas, petal, count);
+      tileRendering = layout;
+      const bytes = await canvas.encode("png");
+      const file = assetName(`petal-${slug}-${count}`, "png", bytes);
+      await writeFile(path.join(staging, "assets", file), bytes);
+      variants[count] = `./${file}`;
+    }
+    images[slug] = { name: petal.name, images: variants, bodies: minimum };
   }
   const data = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     source: {
       homepage: upstream,
       script: sourceUrl,
@@ -126,6 +150,13 @@ async function main() {
       extraction: game.extraction,
     },
     intervalMs: game.intervalMs,
+    rendering: {
+      ...game.rendering,
+      ...tileRendering,
+      fontURL,
+      fontStyleURL: fontStyleURL.href,
+      fontSha256: fontHash,
+    },
     rarity: {
       name: game.superRarity.name,
       slug: game.superRarity.slug,
@@ -146,7 +177,7 @@ async function main() {
   const appFile = assetName("app", "js", app);
   await writeFile(path.join(staging, "assets", appFile), app);
   const css =
-    `:root{--super:${data.rarity.color}}\n` +
+    `:root{--super:${data.rarity.color};--petal-image-size:${(1 + (2 * data.rendering.padding) / data.rendering.tileSize) * 100}%;--petal-image-offset:${(-data.rendering.padding / data.rendering.tileSize) * 100}%}\n` +
     (await readFile(path.join(root, "src/style.css"), "utf8"));
   const cssFile = assetName("style", "css", css);
   await writeFile(path.join(staging, "assets", cssFile), css);
