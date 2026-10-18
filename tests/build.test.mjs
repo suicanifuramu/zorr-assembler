@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -65,6 +66,36 @@ test("published output has no game runtime, research artifacts, placeholders or 
   );
   assert.doesNotMatch(app, /__[A-Z_]+__|research\/|deobfuscator|WebSocket/);
   assert.doesNotMatch(app, /class="petal-(?:quantity|name)"/);
+  // Page text uses the same self-hosted font file as the petal icons.
+  const css = await readFile(
+    path.join(
+      dist,
+      "assets",
+      assets.find((f) => /^style\..*\.css$/.test(f)),
+    ),
+    "utf8",
+  );
+  const data = JSON.parse(
+    await readFile(
+      path.join(
+        dist,
+        "assets",
+        assets.find((f) => /^recipes\..*\.json$/.test(f)),
+      ),
+      "utf8",
+    ),
+  );
+  const font = css.match(
+    /@font-face\{font-family:"([^"]+)";src:url\(\.\/([^)]+)\)/,
+  );
+  assert.equal(font[1], data.rendering.font);
+  assert.equal(
+    createHash("sha256")
+      .update(await readFile(path.join(dist, "assets", font[2])))
+      .digest("hex"),
+    data.rendering.fontSha256,
+  );
+  assert.match(css, /font:\s*[\d.]+px\/[\d.]+ var\(--font\)/);
   // Minimal viewer: no outbound links, and times use the device's own time zone.
   assert.doesNotMatch(html + app, /https?:\/\/|<a\b|<footer|<header/);
   assert.doesNotMatch(app, /timeZone/);

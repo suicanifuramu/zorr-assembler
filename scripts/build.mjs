@@ -95,12 +95,16 @@ async function main() {
     outputs: items(r.outputs),
   }));
   const images = {};
+  if (!/^[\w -]+$/.test(game.rendering.font))
+    throw new Error(`Unsafe font family ${game.rendering.font}`);
   const fontStyleURL = new URL("https://fonts.googleapis.com/css2");
   fontStyleURL.searchParams.set("family", game.rendering.font);
+  // One subset serves both the icon renderer and the page text (printable ASCII + "–…").
+  const ascii = String.fromCharCode(
+    ...Array.from({ length: 95 }, (_, i) => i + 32),
+  );
   const characters = [
-    ...new Set(
-      [...petals.values()].map((p) => p.name).join("") + " 0123456789.xkmbt",
-    ),
+    ...new Set([...petals.values()].map((p) => p.name).join("") + ascii + "–…"),
   ].join("");
   fontStyleURL.searchParams.set("text", characters);
   const fontStyle = await download(fontStyleURL.href);
@@ -184,8 +188,11 @@ async function main() {
     .replace("__DATA_URL__", `./${dataFile}`);
   const appFile = assetName("app", "js", app);
   await writeFile(path.join(staging, "assets", appFile), app);
+  const fontFile = assetName("font", "ttf", fontBytes);
+  await writeFile(path.join(staging, "assets", fontFile), fontBytes);
   const css =
-    `:root{--super:${data.rarity.color};--petal-image-size:${(1 + (2 * data.rendering.padding) / data.rendering.tileSize) * 100}%;--petal-image-offset:${(-data.rendering.padding / data.rendering.tileSize) * 100}%}\n` +
+    `@font-face{font-family:"${game.rendering.font}";src:url(./${fontFile}) format("truetype");font-display:swap}\n` +
+    `:root{--font:"${game.rendering.font}";--super:${data.rarity.color};--petal-image-size:${(1 + (2 * data.rendering.padding) / data.rendering.tileSize) * 100}%;--petal-image-offset:${(-data.rendering.padding / data.rendering.tileSize) * 100}%}\n` +
     (await readFile(path.join(root, "src/style.css"), "utf8"));
   const cssFile = assetName("style", "css", css);
   await writeFile(path.join(staging, "assets", cssFile), css);

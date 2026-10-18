@@ -26,6 +26,9 @@ const escape = (value) =>
         c
       ],
   );
+// The icon font has no arrow glyph, so draw it instead of falling back to a system font.
+const arrow =
+  '<svg viewBox="0 0 20 12" width="20" height="12" aria-label="makes"><path d="M1 6h17M13 1l5 5-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 let data;
 let entries;
 let renderedSlot;
@@ -50,7 +53,7 @@ function render(slot) {
     const day = dayFormat.format(start);
     if (day !== lastDay) html += `<h2>${day}</h2>`;
     lastDay = day;
-    html += `<section class="row${i ? "" : " now"}"><p>${timeFormat.format(start)}–${timeFormat.format(end)} <b></b></p><div>${petals(recipe.inputs)}<i>→</i>${petals(recipe.outputs)}</div></section>`;
+    html += `<section class="row${i ? "" : " now"}"><p>${timeFormat.format(start)}–${timeFormat.format(end)} <b></b></p><div>${petals(recipe.inputs)}${arrow}${petals(recipe.outputs)}</div></section>`;
   }
   list.innerHTML = html;
   renderedSlot = slot;
