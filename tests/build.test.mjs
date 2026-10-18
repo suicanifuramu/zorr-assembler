@@ -103,8 +103,19 @@ test("published output has no game runtime, research artifacts, placeholders or 
     data.rendering.fontSha256,
   );
   assert.match(css, /font:\s*[\d.]+px\/[\d.]+ var\(--font\)/);
-  // Minimal viewer: no outbound links, and times use the device's own time zone.
-  assert.doesNotMatch(html + app, /https?:\/\/|<a\b|<footer|<header/);
+  // Minimal viewer: the only outbound link is the source repository, in a new tab.
+  const repository = "https://github.com/suicanifuramu/zorr-assembler";
+  assert.deepEqual(
+    [...(html + app).matchAll(/https?:\/\/[^\s"'<>]+/g)].map((m) => m[0]),
+    [repository],
+  );
+  const links = [...(html + app).matchAll(/<a\b[^>]*>/g)].map((m) => m[0]);
+  assert.equal(links.length, 1);
+  assert.ok(links[0].includes(`href="${repository}"`));
+  assert.match(links[0], /target="_blank"/);
+  assert.match(links[0], /rel="noopener noreferrer"/);
+  assert.doesNotMatch(html + app, /<footer|<header/);
+  // Times use the device's own time zone.
   assert.doesNotMatch(app, /timeZone/);
   assert.deepEqual((await readdir(dist)).sort(), [
     "404.html",

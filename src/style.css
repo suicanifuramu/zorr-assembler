@@ -61,11 +61,27 @@ h2 {
   width: var(--petal-image-size);
   height: var(--petal-image-size);
 }
-#counter {
+#bar {
   position: fixed;
   top: 8px;
   right: 8px;
   z-index: 2;
+  display: flex;
+  gap: 6px;
+}
+#bar a {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  color: #edf3ef;
+  background: #1b241f;
+  border: 1px solid #34413a;
+  border-radius: 10px;
+}
+#bar a:hover {
+  color: var(--super);
+}
+#counter {
   display: flex;
   gap: 4px;
   padding: 4px;

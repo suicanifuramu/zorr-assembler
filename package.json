@@ -2,6 +2,13 @@
   "name": "zorr-assembler",
   "version": "1.0.0",
   "private": true,
+  "description": "Unofficial viewer for the current and upcoming Zorr Assembler recipes",
+  "license": "MIT",
+  "homepage": "https://zorr-assembler.pages.dev/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/suicanifuramu/zorr-assembler.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=24.11.0 <25"
