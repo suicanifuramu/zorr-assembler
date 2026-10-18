@@ -157,6 +157,7 @@ export function extract(source, { Path2D }) {
   const hostMember = (name) =>
     t.memberExpression(t.identifier("host"), t.identifier(name));
   const tileSizes = new Set();
+  const quantityGuards = [];
   listRenderer.traverse({
     CallExpression(p) {
       const n = p.node;
@@ -216,6 +217,14 @@ export function extract(source, { Path2D }) {
         bindHost(p, p.node.object.name, hostMember("mapping"));
     },
     IfStatement(p) {
+      const test = p.node.test;
+      if (
+        t.isBinaryExpression(test, { operator: ">" }) &&
+        t.isMemberExpression(test.left) &&
+        key(test.left) === "Hh" &&
+        t.isNumericLiteral(test.right, { value: 1 })
+      )
+        quantityGuards.push(test);
       if (
         t.isIdentifier(p.node.test) &&
         generate(p.node.consequent).code.includes("rendering icons:")
@@ -223,6 +232,8 @@ export function extract(source, { Path2D }) {
         bindHost(p, p.node.test.name, t.booleanLiteral(false));
     },
   });
+  // Viewer requirement: include x1 using the original quantity drawing code.
+  unique(quantityGuards, "quantity visibility guard").operator = ">=";
   iconLabel.traverse({
     AssignmentExpression(p) {
       const n = p.node;
@@ -476,6 +487,7 @@ export function extract(source, { Path2D }) {
     t.identifier("paintSlot"),
     [t.identifier("host")],
     t.blockStatement([
+      ...parse("const ResizeObserver=class{observe(){}};").program.body,
       t.variableDeclaration("const", [...hostBindings.values()]),
       listRenderer.node,
       ...parse(
@@ -532,6 +544,7 @@ export function extract(source, { Path2D }) {
     throw new Error("Super rarity was not found");
   return {
     ...data,
+    runtimeCode: code + "\n" + exportCode,
     superRarity,
     intervalMs: schedule.intervalMs,
     rendering: { iconSize, tileSize, font },

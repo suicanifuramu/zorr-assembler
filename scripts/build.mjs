@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile, mkdir, rm, cp, rename } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { Path2D, GlobalFonts } from "@napi-rs/canvas";
+import { Path2D } from "@napi-rs/canvas";
 import { webcrack } from "webcrack";
 import deobfuscator from "zorr-deobfuscator";
 import { extract } from "./lib/extract.mjs";
-import { paintAtlasCell, paintTile } from "./lib/paint.mjs";
+import { openRenderer } from "./lib/browser.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const cache = path.join(root, ".cache");
@@ -111,34 +111,41 @@ async function main() {
   });
   if (!fontResponse.ok) throw new Error(`Font HTTP ${fontResponse.status}`);
   const fontBytes = Buffer.from(await fontResponse.arrayBuffer());
-  if (!GlobalFonts.register(fontBytes, game.rendering.font))
-    throw new Error("Upstream icon font could not be registered");
   const fontHash = hash(fontBytes);
   await writeFile(path.join(cache, `font.${fontHash}.ttf`), fontBytes);
   log(`Loaded upstream icon font: ${game.rendering.font}`);
   let tileRendering;
+  const renderer = await openRenderer(game, fontBytes);
+  log(`Rendering with Chromium ${renderer.version}`);
   // This is the original icon renderer. Supply the lowest body count while retaining
   // the original size/position/angle; Super is a presentation color, not a quantity.
-  for (const [slug, petal] of petals) {
-    if (!/^[a-z\d_]+$/.test(slug)) throw new Error(`Unsafe petal slug ${slug}`);
-    const counts = game.rarities.map((r) =>
-      game.property(petal, "count", r.id),
-    );
-    if (!counts.every((c) => Number.isSafeInteger(c) && c >= 0))
-      throw new Error(`Invalid body count ${slug}`);
-    const minimum = Math.min(...counts);
-    const rarity = game.rarities[counts.indexOf(minimum)];
-    const atlas = paintAtlasCell(game, petal, rarity.id);
-    const variants = {};
-    for (const count of quantities.get(slug)) {
-      const { canvas, ...layout } = paintTile(game, atlas, petal, count);
-      tileRendering = layout;
-      const bytes = await canvas.encode("png");
-      const file = assetName(`petal-${slug}-${count}`, "png", bytes);
-      await writeFile(path.join(staging, "assets", file), bytes);
-      variants[count] = `./${file}`;
+  try {
+    for (const [slug, petal] of petals) {
+      if (!/^[a-z\d_]+$/.test(slug))
+        throw new Error(`Unsafe petal slug ${slug}`);
+      const counts = game.rarities.map((r) =>
+        game.property(petal, "count", r.id),
+      );
+      if (!counts.every((c) => Number.isSafeInteger(c) && c >= 0))
+        throw new Error(`Invalid body count ${slug}`);
+      const minimum = Math.min(...counts);
+      const rarity = game.rarities[counts.indexOf(minimum)];
+      const variants = {};
+      for (const { count, png, ...layout } of await renderer.render(
+        petal.id,
+        rarity.id,
+        quantities.get(slug),
+      )) {
+        tileRendering = layout;
+        const bytes = Buffer.from(png, "base64");
+        const file = assetName(`petal-${slug}-${count}`, "png", bytes);
+        await writeFile(path.join(staging, "assets", file), bytes);
+        variants[count] = `./${file}`;
+      }
+      images[slug] = { name: petal.name, images: variants, bodies: minimum };
     }
-    images[slug] = { name: petal.name, images: variants, bodies: minimum };
+  } finally {
+    await renderer.close();
   }
   const data = {
     schemaVersion: 2,
@@ -153,6 +160,7 @@ async function main() {
     rendering: {
       ...game.rendering,
       ...tileRendering,
+      engine: `Chromium ${renderer.version}`,
       fontURL,
       fontStyleURL: fontStyleURL.href,
       fontSha256: fontHash,
@@ -186,7 +194,6 @@ async function main() {
     .replace("__APP_URL__", `./assets/${appFile}`);
   await writeFile(path.join(staging, "index.html"), html);
   await cp(path.join(root, "public"), staging, { recursive: true });
-  await cp(path.join(root, "assets/icon.svg"), path.join(staging, "icon.svg"));
   await rename(staging, path.join(root, "dist"));
   log(
     `${recipes.length} recipes, ${petals.size} icons, interval ${game.intervalMs}ms, ${data.rarity.name} ${data.rarity.color}`,

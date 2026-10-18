@@ -65,11 +65,13 @@ test("published output has no game runtime, research artifacts, placeholders or 
   );
   assert.doesNotMatch(app, /__[A-Z_]+__|research\/|deobfuscator|WebSocket/);
   assert.doesNotMatch(app, /class="petal-(?:quantity|name)"/);
+  // Minimal viewer: no outbound links, and times use the device's own time zone.
+  assert.doesNotMatch(html + app, /https?:\/\/|<a\b|<footer|<header/);
+  assert.doesNotMatch(app, /timeZone/);
   assert.deepEqual((await readdir(dist)).sort(), [
     "404.html",
     "_headers",
     "assets",
-    "icon.svg",
     "index.html",
   ]);
 });

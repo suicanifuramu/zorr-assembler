@@ -19,6 +19,8 @@
     "@babel/traverse": "8.0.4",
     "@babel/types": "8.0.4",
     "@napi-rs/canvas": "1.0.11",
+    "@sparticuz/chromium": "153.0.0",
+    "playwright-core": "1.64.1",
     "webcrack": "2.16.0",
     "zorr-deobfuscator": "https://codeload.github.com/suicanifuramu/zorr-deobfuscator/tar.gz/fdf8e0882ea9831ec58b695398069fa101df52be"
   },

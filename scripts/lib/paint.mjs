@@ -1,19 +1,11 @@
-import { createCanvas } from "@napi-rs/canvas";
-
-const proto = Object.getPrototypeOf(createCanvas(1, 1).getContext("2d"));
-if (!proto.As)
-  proto.As = function (s) {
-    this.scale(s, s);
-  };
-
 // DOM/event adapters for an idle, single-slot instance of the original list renderer.
 // Background, clipping, border, sprite transfer, text and quantity calls remain upstream.
-export function paintTile(game, atlas, petal, count) {
+export function paintTile(game, atlas, petal, count, createCanvas) {
   const tileSize = game.rendering.tileSize;
   const padding = tileSize / 2;
   const extent = tileSize + 2 * padding;
   const canvas = createCanvas(1, 1);
-  canvas.style = {};
+  if (!canvas.style) canvas.style = {};
   const parent = {
     style: {},
     offsetWidth: extent,
@@ -39,7 +31,7 @@ export function paintTile(game, atlas, petal, count) {
   return { canvas, padding, tileSize, pixelSize: canvas.width };
 }
 
-export function paintAtlasCell(game, petal, rarity) {
+export function paintAtlasCell(game, petal, rarity, createCanvas) {
   const size = game.rendering.iconSize;
   const canvas = createCanvas(size * 2, size * 2);
   const ctx = canvas.getContext("2d");

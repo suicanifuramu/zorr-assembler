@@ -4,6 +4,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { createCanvas, Path2D, GlobalFonts } from "@napi-rs/canvas";
 import { extract } from "../scripts/lib/extract.mjs";
 import { paintAtlasCell, paintTile } from "../scripts/lib/paint.mjs";
+import { openRenderer } from "../scripts/lib/browser.mjs";
 
 const files = await readdir(new URL("../dist/assets/", import.meta.url));
 const data = JSON.parse(
@@ -23,12 +24,14 @@ const game = extract(
   await readFile(new URL(`../.cache/${decoded}`, import.meta.url), "utf8"),
   { Path2D },
 );
-GlobalFonts.register(
-  await readFile(
-    new URL(`../.cache/font.${data.rendering.fontSha256}.ttf`, import.meta.url),
-  ),
-  data.rendering.font,
+const fontBytes = await readFile(
+  new URL(`../.cache/font.${data.rendering.fontSha256}.ttf`, import.meta.url),
 );
+GlobalFonts.register(fontBytes, data.rendering.font);
+const proto = Object.getPrototypeOf(createCanvas(1, 1).getContext("2d"));
+proto.As ??= function (s) {
+  this.scale(s, s);
+};
 const petal = game.recipes[0].inputs[0].petal;
 
 function recording(ctx, calls) {
@@ -77,8 +80,8 @@ test("the original name renderer draws outlined text inside the full atlas cell"
   assert.equal(stroke.lineWidth, 3);
 });
 
-test("the original list renderer suppresses x1 and draws angled quantities above the slot", () => {
-  const atlas = paintAtlasCell(game, petal, 0);
+test("the original list renderer draws angled quantities, including x1, above the slot", () => {
+  const atlas = paintAtlasCell(game, petal, 0, createCanvas);
   const original = game.paintSlot;
   let calls;
   game.paintSlot = (host) => {
@@ -88,9 +91,9 @@ test("the original list renderer suppresses x1 and draws angled quantities above
     return original(host);
   };
   try {
-    const one = paintTile(game, atlas, petal, 1).canvas;
-    assert.equal(calls.filter((c) => c.method === "fillText").length, 0);
-    const two = paintTile(game, atlas, petal, 2).canvas;
+    const one = paintTile(game, atlas, petal, 1, createCanvas).canvas;
+    assert.equal(calls.find((c) => c.method === "fillText").args[0], "x1");
+    const two = paintTile(game, atlas, petal, 2, createCanvas).canvas;
     const label = calls.find((c) => c.method === "fillText");
     assert.equal(label.args[0], "x2");
     assert.match(label.font, /bolder 28px/);
@@ -110,7 +113,7 @@ test("the original list renderer suppresses x1 and draws angled quantities above
           .data,
       );
     assert.deepEqual(lower(one), lower(two));
-    const large = paintTile(game, atlas, petal, 1999).canvas;
+    const large = paintTile(game, atlas, petal, 1999, createCanvas).canvas;
     assert.equal(calls.find((c) => c.method === "fillText").args[0], "x1.99k");
     const edge = large
       .getContext("2d")
@@ -125,5 +128,50 @@ test("the original list renderer suppresses x1 and draws angled quantities above
     }
   } finally {
     game.paintSlot = original;
+  }
+});
+
+// Kitty's ears (scale(-1, 1)) and Nuke's sectors (rotate) are sub-paths built inside
+// save()/restore(); @napi-rs/canvas misplaces them, so icons are drawn in Chromium.
+test("Chromium draws transformed sub-paths of mirror-symmetric bodies symmetrically", async () => {
+  const renderer = await openRenderer(game, fontBytes);
+  try {
+    for (const slug of ["kitty", "nuke"]) {
+      const size = 160;
+      const px = await renderer.page.evaluate(
+        ({ slug, size }) => {
+          const ctx = createCanvas(size, size).getContext("2d");
+          ctx.scale(2, 2);
+          result.draw(
+            ctx,
+            result.petals.find((p) => p.slug === slug),
+            0,
+          );
+          return [...ctx.getImageData(0, 0, size, size).data];
+        },
+        { slug, size },
+      );
+      let left = size;
+      let right = -1;
+      for (let i = 0; i < px.length; i += 4)
+        if (px[i + 3]) {
+          left = Math.min(left, (i / 4) % size);
+          right = Math.max(right, (i / 4) % size);
+        }
+      let painted = 0;
+      let mismatched = 0;
+      for (let y = 0; y < size; y++)
+        for (let x = left; x <= right; x++) {
+          const a = (y * size + x) * 4;
+          const b = (y * size + left + right - x) * 4;
+          if (px[a + 3] || px[b + 3]) painted++;
+          if ([0, 1, 2, 3].some((k) => Math.abs(px[a + k] - px[b + k]) > 64))
+            mismatched++;
+        }
+      assert.ok(painted > 1000, `${slug} body was drawn`);
+      assert.ok(mismatched / painted < 0.01, `${slug} is mirror-symmetric`);
+    }
+  } finally {
+    await renderer.close();
   }
 });
