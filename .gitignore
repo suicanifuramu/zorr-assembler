@@ -1,0 +1,7 @@
+research/generated/
+node_modules/
+dist/
+.cache/
+.wrangler/
+*.log
+!research/evidence/*.log
