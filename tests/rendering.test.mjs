@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import { createCanvas, Path2D, GlobalFonts } from "@napi-rs/canvas";
@@ -80,7 +80,7 @@ test("the original name renderer draws outlined text inside the full atlas cell"
   assert.equal(stroke.lineWidth, 3);
 });
 
-test("the original list renderer draws angled quantities, including x1, above the slot", () => {
+test("the original list renderer draws angled quantities above the slot, none on label-free tiles", () => {
   const atlas = paintAtlasCell(game, petal, 0, createCanvas);
   const original = game.paintSlot;
   let calls;
@@ -91,8 +91,10 @@ test("the original list renderer draws angled quantities, including x1, above th
     return original(host);
   };
   try {
+    paintTile(game, atlas, petal, 0, createCanvas);
+    assert.equal(calls.filter((c) => c.method === "fillText").length, 0);
     const one = paintTile(game, atlas, petal, 1, createCanvas).canvas;
-    assert.equal(calls.find((c) => c.method === "fillText").args[0], "x1");
+    assert.equal(calls.filter((c) => c.method === "fillText").length, 0);
     const two = paintTile(game, atlas, petal, 2, createCanvas).canvas;
     const label = calls.find((c) => c.method === "fillText");
     assert.equal(label.args[0], "x2");
@@ -133,9 +135,11 @@ test("the original list renderer draws angled quantities, including x1, above th
 
 // Kitty's ears (scale(-1, 1)) and Nuke's sectors (rotate) are sub-paths built inside
 // save()/restore(); @napi-rs/canvas misplaces them, so icons are drawn in Chromium.
+const renderer = await openRenderer(game, fontBytes);
+after(() => renderer.close());
+
 test("Chromium draws transformed sub-paths of mirror-symmetric bodies symmetrically", async () => {
-  const renderer = await openRenderer(game, fontBytes);
-  try {
+  {
     for (const slug of ["kitty", "nuke"]) {
       const size = 160;
       const px = await renderer.page.evaluate(
@@ -171,7 +175,57 @@ test("Chromium draws transformed sub-paths of mirror-symmetric bodies symmetrica
       assert.ok(painted > 1000, `${slug} body was drawn`);
       assert.ok(mismatched / painted < 0.01, `${slug} is mirror-symmetric`);
     }
-  } finally {
-    await renderer.close();
+  }
+});
+
+test("label-free tile + shipped label pass equals the original slot rendering", async () => {
+  await renderer.page.addScriptTag({ content: game.quantityCode });
+  const results = await renderer.page.evaluate(
+    ({ id, counts }) => {
+      const game = globalThis.result;
+      const petal = game.petals[id];
+      const atlas = paintAtlasCell(game, petal, 0, createCanvas);
+      const pixels = (canvas) =>
+        canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height)
+          .data;
+      const base = pixels(
+        paintTile(game, atlas, petal, 0, createCanvas).canvas,
+      );
+      return counts.map((count) => {
+        const { canvas, padding, tileSize } = paintTile(
+          game,
+          atlas,
+          petal,
+          0,
+          createCanvas,
+        );
+        const ctx = canvas.getContext("2d");
+        const scale = canvas.width / (tileSize + 2 * padding);
+        ctx.scale(scale, scale);
+        drawQuantity(ctx, {
+          offsetLeft: padding,
+          offsetTop: padding,
+          offsetWidth: tileSize,
+          Hh: count,
+        });
+        const layered = pixels(canvas);
+        const original = pixels(
+          paintTile(game, atlas, petal, count, createCanvas).canvas,
+        );
+        let changed = 0;
+        let different = 0;
+        for (let i = 0; i < layered.length; i++) {
+          if (layered[i] !== base[i]) changed++;
+          if (layered[i] !== original[i]) different++;
+        }
+        return { count, changed, different };
+      });
+    },
+    { id: petal.id, counts: [1, 2, 30, 1999, 123456] },
+  );
+  for (const { count, changed, different } of results) {
+    assert.ok(changed > 500, `x${count} label is drawn`);
+    // The original omits x1, so only quantities above one can be compared.
+    if (count > 1) assert.equal(different, 0, `x${count} matches original`);
   }
 });

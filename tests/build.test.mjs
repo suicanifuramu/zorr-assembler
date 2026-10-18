@@ -16,7 +16,7 @@ test("built site contains complete live recipes and a valid generated icon for e
   const data = JSON.parse(
     await readFile(path.join(dist, "assets", file), "utf8"),
   );
-  assert.equal(data.schemaVersion, 2);
+  assert.equal(data.schemaVersion, 3);
   assert.equal(data.rarity.slug, "super");
   assert.match(data.rarity.color, /^#[a-f\d]{6}$/i);
   assert.match(data.source.script, /^https:\/\/zorr\.pages\.dev\/[^/]+\.js/);
@@ -30,18 +30,15 @@ test("built site contains complete live recipes and a valid generated icon for e
     for (const item of [...recipe.inputs, ...recipe.outputs]) {
       assert.ok(Number.isSafeInteger(item.count) && item.count > 0);
       assert.ok(data.petals[item.slug]?.name);
-      assert.ok(data.petals[item.slug].images[item.count]);
     }
   }
   for (const petal of Object.values(data.petals)) {
     assert.ok(Number.isSafeInteger(petal.bodies) && petal.bodies >= 0);
-    for (const file of Object.values(petal.images)) {
-      const iconPath = path.join(dist, "assets", file);
-      assert.ok((await stat(iconPath)).size > 0);
-      const image = await loadImage(iconPath);
-      assert.equal(image.width, data.rendering.pixelSize);
-      assert.equal(image.height, data.rendering.pixelSize);
-    }
+    const iconPath = path.join(dist, "assets", petal.image);
+    assert.ok((await stat(iconPath)).size > 0);
+    const image = await loadImage(iconPath);
+    assert.equal(image.width, data.rendering.pixelSize);
+    assert.equal(image.height, data.rendering.pixelSize);
   }
   const s = scheduleAt(Date.now(), data.recipes, data.intervalMs);
   assert.equal(
@@ -66,6 +63,16 @@ test("published output has no game runtime, research artifacts, placeholders or 
   );
   assert.doesNotMatch(app, /__[A-Z_]+__|research\/|deobfuscator|WebSocket/);
   assert.doesNotMatch(app, /class="petal-(?:quantity|name)"/);
+  // Only the upstream label pass ships to the browser, imported by its hashed name.
+  const quantityFile = assets.find((f) => /^quantity\..*\.js$/.test(f));
+  const quantity = await readFile(
+    path.join(dist, "assets", quantityFile),
+    "utf8",
+  );
+  assert.ok(app.includes(`from "./${quantityFile}"`));
+  assert.match(quantity, /export \{ drawQuantity \};/);
+  assert.ok(quantity.length < 4096, "label pass only, not the game runtime");
+  assert.doesNotMatch(quantity, /petals|recipes|WebSocket|drawImage/);
   // Page text uses the same self-hosted font file as the petal icons.
   const css = await readFile(
     path.join(

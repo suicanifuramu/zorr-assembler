@@ -81,12 +81,9 @@ async function main() {
   }
   const game = extract(decoded, { Path2D });
   const petals = new Map();
-  const quantities = new Map();
   const items = (list) =>
     list.map(({ petal, count }) => {
       petals.set(petal.slug, petal);
-      if (!quantities.has(petal.slug)) quantities.set(petal.slug, new Set());
-      quantities.get(petal.slug).add(count);
       return { slug: petal.slug, count };
     });
   const recipes = game.recipes.map((r) => ({
@@ -134,25 +131,18 @@ async function main() {
         throw new Error(`Invalid body count ${slug}`);
       const minimum = Math.min(...counts);
       const rarity = game.rarities[counts.indexOf(minimum)];
-      const variants = {};
-      for (const { count, png, ...layout } of await renderer.render(
-        petal.id,
-        rarity.id,
-        quantities.get(slug),
-      )) {
-        tileRendering = layout;
-        const bytes = Buffer.from(png, "base64");
-        const file = assetName(`petal-${slug}-${count}`, "png", bytes);
-        await writeFile(path.join(staging, "assets", file), bytes);
-        variants[count] = `./${file}`;
-      }
-      images[slug] = { name: petal.name, images: variants, bodies: minimum };
+      const { png, ...layout } = await renderer.render(petal.id, rarity.id);
+      tileRendering = layout;
+      const bytes = Buffer.from(png, "base64");
+      const file = assetName(`petal-${slug}`, "png", bytes);
+      await writeFile(path.join(staging, "assets", file), bytes);
+      images[slug] = { name: petal.name, image: `./${file}`, bodies: minimum };
     }
   } finally {
     await renderer.close();
   }
   const data = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     source: {
       homepage: upstream,
       script: sourceUrl,
@@ -183,8 +173,12 @@ async function main() {
   const schedule = await readFile(path.join(root, "src/schedule.mjs"), "utf8");
   const scheduleFile = assetName("schedule", "js", schedule);
   await writeFile(path.join(staging, "assets", scheduleFile), schedule);
+  const quantity = `// Upstream slot renderer label pass (source line ${game.extraction.quantityLine}).\n${game.quantityCode}\nexport { drawQuantity };\n`;
+  const quantityFile = assetName("quantity", "js", quantity);
+  await writeFile(path.join(staging, "assets", quantityFile), quantity);
   const app = (await readFile(path.join(root, "src/app.js"), "utf8"))
     .replace("./schedule.mjs", `./${scheduleFile}`)
+    .replace("./quantity.mjs", `./${quantityFile}`)
     .replace("__DATA_URL__", `./${dataFile}`);
   const appFile = assetName("app", "js", app);
   await writeFile(path.join(staging, "assets", appFile), app);

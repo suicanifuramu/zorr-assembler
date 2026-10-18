@@ -8,6 +8,21 @@
     <script type="module" src="__APP_URL__"></script>
   </head>
   <body>
+    <div id="counter">
+      <button type="button" data-step="-1" aria-label="Fewer assembles">
+        -
+      </button>
+      <input
+        id="assembles"
+        type="number"
+        min="1"
+        max="9999"
+        value="1"
+        inputmode="numeric"
+        aria-label="Assembles"
+      />
+      <button type="button" data-step="1" aria-label="More assembles">+</button>
+    </div>
     <main id="list"></main>
     <p id="status" role="status">Loading…</p>
   </body>

@@ -157,7 +157,7 @@ export function extract(source, { Path2D }) {
   const hostMember = (name) =>
     t.memberExpression(t.identifier("host"), t.identifier(name));
   const tileSizes = new Set();
-  const quantityGuards = [];
+  const quantityPasses = [];
   listRenderer.traverse({
     CallExpression(p) {
       const n = p.node;
@@ -216,15 +216,30 @@ export function extract(source, { Path2D }) {
       )
         bindHost(p, p.node.object.name, hostMember("mapping"));
     },
+    ForOfStatement(p) {
+      const calls = new Set();
+      let quantityText = false;
+      p.traverse({
+        CallExpression(q) {
+          if (t.isMemberExpression(q.node.callee))
+            calls.add(key(q.node.callee));
+        },
+        BinaryExpression(q) {
+          const n = q.node;
+          if (
+            n.operator === "+" &&
+            t.isStringLiteral(n.left, { value: "x" }) &&
+            t.isCallExpression(n.right) &&
+            t.isMemberExpression(n.right.arguments[0]) &&
+            key(n.right.arguments[0]) === "Hh"
+          )
+            quantityText = true;
+        },
+      });
+      if (quantityText && calls.has("strokeText") && calls.has("fillText"))
+        quantityPasses.push(p);
+    },
     IfStatement(p) {
-      const test = p.node.test;
-      if (
-        t.isBinaryExpression(test, { operator: ">" }) &&
-        t.isMemberExpression(test.left) &&
-        key(test.left) === "Hh" &&
-        t.isNumericLiteral(test.right, { value: 1 })
-      )
-        quantityGuards.push(test);
       if (
         t.isIdentifier(p.node.test) &&
         generate(p.node.consequent).code.includes("rendering icons:")
@@ -232,47 +247,47 @@ export function extract(source, { Path2D }) {
         bindHost(p, p.node.test.name, t.booleanLiteral(false));
     },
   });
-  // Viewer requirement: include x1 using the original quantity drawing code.
-  unique(quantityGuards, "quantity visibility guard").operator = ">=";
-  iconLabel.traverse({
-    AssignmentExpression(p) {
-      const n = p.node;
-      if (
-        t.isMemberExpression(n.left) &&
-        key(n.left) === "font" &&
-        t.isBinaryExpression(n.right) &&
-        t.isIdentifier(n.right.right)
-      ) {
-        const b = p.scope.getBinding(n.right.right.name);
-        replacements.set(b.path.node, t.stringLiteral(JSON.stringify(font)));
-      }
-    },
-    CallExpression(p) {
-      const n = p.node;
-      if (
-        t.isIdentifier(n.callee) &&
-        t.isStringLiteral(n.arguments[0], { value: "petals" }) &&
-        t.isStringLiteral(n.arguments[2], { value: "name" })
-      ) {
-        const b = p.scope.getBinding(n.callee.name);
-        replacements.set(
-          b.path.node,
-          t.arrowFunctionExpression(
-            [
-              t.identifier("category"),
-              t.identifier("item"),
-              t.identifier("field"),
-            ],
-            t.memberExpression(
-              t.identifier("item"),
-              t.identifier("field"),
-              true,
+  const quantityPass = unique(quantityPasses, "quantity label pass");
+  for (const fn of [iconLabel, quantityPass])
+    fn.traverse({
+      AssignmentExpression(p) {
+        const n = p.node;
+        if (
+          t.isMemberExpression(n.left) &&
+          key(n.left) === "font" &&
+          t.isBinaryExpression(n.right) &&
+          t.isIdentifier(n.right.right)
+        ) {
+          const b = p.scope.getBinding(n.right.right.name);
+          replacements.set(b.path.node, t.stringLiteral(JSON.stringify(font)));
+        }
+      },
+      CallExpression(p) {
+        const n = p.node;
+        if (
+          t.isIdentifier(n.callee) &&
+          t.isStringLiteral(n.arguments[0], { value: "petals" }) &&
+          t.isStringLiteral(n.arguments[2], { value: "name" })
+        ) {
+          const b = p.scope.getBinding(n.callee.name);
+          replacements.set(
+            b.path.node,
+            t.arrowFunctionExpression(
+              [
+                t.identifier("category"),
+                t.identifier("item"),
+                t.identifier("field"),
+              ],
+              t.memberExpression(
+                t.identifier("item"),
+                t.identifier("field"),
+                true,
+              ),
             ),
-          ),
-        );
-      }
-    },
-  });
+          );
+        }
+      },
+    });
   const iconSizes = new Set();
   for (const ref of iconBody.scope.getBinding(iconBody.node.id.name)
     .referencePaths) {
@@ -496,6 +511,85 @@ export function extract(source, { Path2D }) {
       ).program.body,
     ]),
   );
+  // The viewer multiplies quantities at runtime, so it draws the slot renderer's own
+  // label pass (and nothing else) over label-free tiles. Idle slots: no animation.
+  const pass = quantityPass.node;
+  const strokes = [];
+  const scrollers = [];
+  quantityPass.traverse({
+    CallExpression(p) {
+      const n = p.node;
+      if (key(n.callee) === "strokeText" && t.isIdentifier(n.callee.object))
+        strokes.push(n.callee.object.name);
+    },
+    MemberExpression(p) {
+      if (key(p.node) === "scrollTop" && t.isIdentifier(p.node.object))
+        scrollers.push(p.node.object.name);
+    },
+  });
+  const contextName = unique([...new Set(strokes)], "quantity label context");
+  const scrollerName = unique(
+    [...new Set(scrollers)],
+    "quantity label scroller",
+  );
+  if (
+    !t.isIdentifier(pass.right) ||
+    !t.isArrayPattern(pass.left.declarations?.[0]?.id)
+  )
+    throw new Error("Unexpected quantity label pass shape");
+  const provided = new Set(
+    [contextName, scrollerName, pass.right.name].map(
+      (name) => quantityPass.scope.getBinding(name).path.node,
+    ),
+  );
+  const clientDeps = new Map();
+  function collectClient(p) {
+    p.traverse({
+      ReferencedIdentifier(q) {
+        const b = q.scope.getBinding(q.node.name);
+        if (
+          !b ||
+          contains(p.node, b.path.node) ||
+          provided.has(b.path.node) ||
+          clientDeps.has(b.path.node)
+        )
+          return;
+        if (replacements.has(b.path.node))
+          clientDeps.set(
+            b.path.node,
+            t.variableDeclaration("const", [
+              t.variableDeclarator(
+                t.identifier(q.node.name),
+                replacements.get(b.path.node),
+              ),
+            ]),
+          );
+        else if (b.path.isFunctionDeclaration())
+          clientDeps.set(b.path.node, b.path.node);
+        else if (b.path.isVariableDeclarator() && b.kind === "const")
+          clientDeps.set(
+            b.path.node,
+            t.variableDeclaration("const", [b.path.node]),
+          );
+        else
+          throw new Error(
+            `Unsupported quantity label dependency: ${q.node.name}`,
+          );
+        if (!replacements.has(b.path.node)) collectClient(b.path);
+      },
+    });
+  }
+  collectClient(quantityPass);
+  const quantityFunction = parse(
+    `function drawQuantity(${contextName},slot){` +
+      `${contextName}.As??=function(s){this.scale(s,s)};` +
+      `const ${scrollerName}={scrollTop:0},${pass.right.name}=[[slot,undefined]];}`,
+  ).program.body[0];
+  quantityFunction.body.body.push(pass);
+  const quantityCode = generate(
+    t.program([...clientDeps.values(), quantityFunction]),
+    { comments: false },
+  ).code;
   const exportCode = `globalThis.result={petals:${petalName},rarities:${rarity.node.id.name},recipes:${recipeName},property:${propertyName},draw:${iconBody.node.id.name},label:${iconLabel.node.id.name},paintSlot};`;
   const code = generate(
     t.program([
@@ -545,6 +639,7 @@ export function extract(source, { Path2D }) {
   return {
     ...data,
     runtimeCode: code + "\n" + exportCode,
+    quantityCode,
     superRarity,
     intervalMs: schedule.intervalMs,
     rendering: { iconSize, tileSize, font },
@@ -555,6 +650,7 @@ export function extract(source, { Path2D }) {
       rendererLine: iconBody.node.loc.start.line,
       labelLine: iconLabel.node.loc.start.line,
       slotRendererLine: listRenderer.node.loc.start.line,
+      quantityLine: pass.loc.start.line,
     },
   };
 }

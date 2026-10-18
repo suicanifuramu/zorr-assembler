@@ -50,10 +50,49 @@ h2 {
   width: 72px;
   height: 72px;
 }
+/* Like the game's separate label pass: every label above every tile. */
+.p .q {
+  z-index: 1;
+}
 .p img {
   position: absolute;
   left: var(--petal-image-offset);
   top: var(--petal-image-offset);
   width: var(--petal-image-size);
   height: var(--petal-image-size);
+}
+#counter {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: #1b241f;
+  border: 1px solid #34413a;
+  border-radius: 10px;
+}
+#counter button,
+#counter input {
+  height: 34px;
+  border: 0;
+  border-radius: 7px;
+  color: #edf3ef;
+  font: inherit;
+  font-size: 18px;
+}
+#counter button {
+  width: 34px;
+  background: #2a342e;
+  cursor: pointer;
+}
+#counter input {
+  width: 60px;
+  background: none;
+  text-align: center;
+  appearance: textfield;
+}
+#counter input::-webkit-inner-spin-button {
+  appearance: none;
 }

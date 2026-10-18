@@ -44,28 +44,26 @@ export async function openRenderer(game, fontBytes) {
       page,
       version: browser.version(),
       close: () => browser.close(),
-      render: (id, rarity, quantities) =>
+      // Label-free tile (no quantity): the viewer draws the label pass on top.
+      render: (id, rarity) =>
         page.evaluate(
-          ({ id, rarity, quantities }) => {
+          ({ id, rarity }) => {
             const game = globalThis.result;
             const petal = game.petals[id];
             const atlas = paintAtlasCell(game, petal, rarity, createCanvas);
-            return quantities.map((count) => {
-              const { canvas, ...layout } = paintTile(
-                game,
-                atlas,
-                petal,
-                count,
-                createCanvas,
-              );
-              return {
-                count,
-                ...layout,
-                png: canvas.toDataURL("image/png").split(",")[1],
-              };
-            });
+            const { canvas, ...layout } = paintTile(
+              game,
+              atlas,
+              petal,
+              0,
+              createCanvas,
+            );
+            return {
+              ...layout,
+              png: canvas.toDataURL("image/png").split(",")[1],
+            };
           },
-          { id, rarity, quantities: [...quantities] },
+          { id, rarity },
         ),
     };
   } catch (error) {
