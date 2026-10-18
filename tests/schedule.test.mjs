@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { scheduleAt, slotAt } from "../src/schedule.mjs";
+import {
+  formatRemaining,
+  formatUntil,
+  scheduleAt,
+  slotAt,
+} from "../src/schedule.mjs";
 
 // Different recipe count and interval from the live game catch baked-in game values.
 const recipes = Array.from({ length: 7 }, (_, id) => ({ id }));
@@ -39,4 +44,15 @@ test("rejects invalid clock and upstream interval values", () => {
   assert.throws(() => slotAt(NaN, interval), RangeError);
   assert.throws(() => slotAt(1, 0), RangeError);
   assert.throws(() => slotAt(1, 1.5), RangeError);
+});
+
+test("formats start times as minutes, hours and, from 24 hours, days", () => {
+  const minute = 60_000;
+  assert.equal(formatUntil(54 * minute - 30_000), "in 54m");
+  assert.equal(formatUntil(114 * minute), "in 1h 54m");
+  assert.equal(formatUntil(24 * 60 * minute - 1), "in 1d 0h 0m");
+  assert.equal(formatUntil((23 * 60 + 59) * minute), "in 23h 59m");
+  assert.equal(formatUntil((27 * 60 + 54) * minute), "in 1d 3h 54m");
+  assert.equal(formatUntil((48 * 60 + 5) * minute), "in 2d 0h 5m");
+  assert.equal(formatRemaining(53 * minute + 20_500), "53:21 left");
 });

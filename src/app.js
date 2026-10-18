@@ -1,18 +1,22 @@
-import { recipeAtSlot, slotAt } from "./schedule.mjs";
+import {
+  formatRemaining,
+  formatUntil,
+  recipeAtSlot,
+  slotAt,
+} from "./schedule.mjs";
 
 const list = document.getElementById("list");
 const status = document.getElementById("status");
 const dataURL = new URL("__DATA_URL__", import.meta.url);
 // Times follow the device clock and its local time zone (no fixed zone).
-const timeFormat = new Intl.DateTimeFormat("ja-JP", {
+const timeFormat = new Intl.DateTimeFormat("en-US", {
   hour: "2-digit",
   minute: "2-digit",
   hourCycle: "h23",
 });
-const dayFormat = new Intl.DateTimeFormat("ja-JP", {
-  month: "numeric",
+const dayFormat = new Intl.DateTimeFormat("en-US", {
+  month: "short",
   day: "numeric",
-  weekday: "short",
 });
 const escape = (value) =>
   String(value).replace(
@@ -36,21 +40,6 @@ function petals(items) {
     .join("");
 }
 
-function until(ms) {
-  const minutes = Math.ceil(ms / 60_000);
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return `${h ? `${h}時間` : ""}${m || !h ? `${m}分` : ""}後`;
-}
-
-function countdown(ms) {
-  const seconds = Math.ceil(ms / 1000);
-  const h = Math.floor(seconds / 3600);
-  const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
-  const s = String(seconds % 60).padStart(2, "0");
-  return `残り ${h ? `${h}:` : ""}${m}:${s}`;
-}
-
 function render(slot) {
   entries = data.recipes.map((_, i) =>
     recipeAtSlot(slot + i, data.recipes, data.intervalMs),
@@ -61,7 +50,7 @@ function render(slot) {
     const day = dayFormat.format(start);
     if (day !== lastDay) html += `<h2>${day}</h2>`;
     lastDay = day;
-    html += `<section class="row${i ? "" : " now"}"><p>${timeFormat.format(start)}–${timeFormat.format(end)}<b></b></p><div>${petals(recipe.inputs)}<i>→</i>${petals(recipe.outputs)}</div></section>`;
+    html += `<section class="row${i ? "" : " now"}"><p>${timeFormat.format(start)}–${timeFormat.format(end)} <b></b></p><div>${petals(recipe.inputs)}<i>→</i>${petals(recipe.outputs)}</div></section>`;
   }
   list.innerHTML = html;
   renderedSlot = slot;
@@ -73,8 +62,8 @@ function update() {
   if (slot !== renderedSlot) render(slot);
   list.querySelectorAll("b").forEach((label, i) => {
     label.textContent = i
-      ? until(entries[i].start - now)
-      : countdown(entries[0].end - now);
+      ? formatUntil(entries[i].start - now)
+      : formatRemaining(entries[0].end - now);
   });
 }
 
@@ -88,6 +77,6 @@ try {
   status.remove();
   setInterval(update, 1000);
 } catch (error) {
-  status.textContent = "読み込めませんでした。再読み込みしてください。";
+  status.textContent = "Failed to load recipes. Please reload.";
   console.error(error);
 }

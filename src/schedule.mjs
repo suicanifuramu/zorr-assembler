@@ -33,3 +33,20 @@ export function scheduleAt(now, recipes, intervalMs) {
     ),
   };
 }
+
+// "in 54m", "in 3h 54m", and from 24 hours on "in 1d 3h 54m".
+export function formatUntil(ms) {
+  const minutes = Math.ceil(ms / 60_000);
+  const d = Math.floor(minutes / 1440);
+  const h = Math.floor((minutes % 1440) / 60);
+  const m = minutes % 60;
+  return `in ${d ? `${d}d ${h}h ${m}m` : h ? `${h}h ${m}m` : `${m}m`}`;
+}
+
+export function formatRemaining(ms) {
+  const seconds = Math.ceil(ms / 1000);
+  const h = Math.floor(seconds / 3600);
+  const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
+  const s = String(seconds % 60).padStart(2, "0");
+  return `${h ? `${h}:` : ""}${m}:${s} left`;
+}

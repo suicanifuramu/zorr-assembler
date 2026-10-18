@@ -15,19 +15,14 @@ h2 {
   color: #9db3a5;
 }
 .row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 20px;
   padding: 14px 0;
   border-bottom: 1px solid #2a342e;
 }
 .row p {
-  margin: 0;
-  width: 128px;
+  margin: 0 0 10px;
 }
 .row b {
-  display: block;
+  margin-left: 8px;
   font-weight: 600;
   color: #9db3a5;
 }
